@@ -1,0 +1,30 @@
+<!-- $t@$h -->
+<!-- This embeds a payload in the png favicon target. For opcodes, look at the compiler.js -->
+<!-- You can generate a png base to tamper with this:                      -->
+<!--   https://github.com/STashakkori/Utilities/blob/main/generatePNG.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Favicon VM Test</title>
+  <link rel="icon" type="image/png" href="/favicon4.png">
+</head>
+<body>
+  <h1>Favicon VM Generator</h1>
+
+  <textarea id="vm-input" rows="6" cols="60">
+PRINT Hello from Favicon
+SET username Alice
+PRINTVAR username
+  </textarea>
+
+  <br><br>
+  <input type="file" id="base-icon" accept="image/png">
+  <button id="generate">Embed into PNG</button>
+
+  <br><br>
+  <img id="output-icon" width="64" height="64"><br>
+  <a id="download-link" download="favicon.png">Download Favicon</a>
+
+  <script type="module" src="/vm-compiler.js"></script>
+</body>
+</html>
