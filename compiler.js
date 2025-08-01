@@ -11,29 +11,30 @@ import { gzipSync } from "https://cdn.skypack.dev/fflate";
 let cmpCounter = 0;
 
 const compileVMSource = (src) => {
-  const lines = src.trim().split("\n");
-  const bytecode = [];
-  const labels = {};
-  const jumpFixups = [];
+  const lines = src.trim().split("\n"); // Split source into lines
+  const bytecode = []; // Final bytecode array
+  const labels = {}; // Label name → byte offset
+  const jumpFixups = []; // Jump placeholders to patch later
 
-  const encode = (s) => new TextEncoder().encode(s);
-  let position = 0;
+  const encode = (s) => new TextEncoder().encode(s); // UTF-8
+  let position = 0; // Bytecode offset
 
-  let ticks = 0;
+  let ticks = 0; // Instruction count as loop protection
   const maxTicks = 10000;
 
   for (let rawLine of lines) {
-    const line = rawLine.split("//")[0].trim();
+    const line = rawLine.split("//")[0].trim(); // Ignore comments
     if (!line) continue;
     if (++ticks > maxTicks) {
       console.error("[VM] Aborting: max instruction count exceeded");
       return;
     }
 
-    const parts = line.split(/\s+/);
-    const instr = parts[0].toUpperCase();
+    const parts = line.split(/\s+/); // Tokenize
+    const instr = parts[0].toUpperCase(); //Normalize opcode
     const emit = (...bytes) => { for (const b of bytes) bytecode.push(b), position++; };
 
+    // Instruction set
     switch (instr) {
       case "PRINT": {
         const enc = encode(parts.slice(1).join(" "));
@@ -69,28 +70,28 @@ const compileVMSource = (src) => {
       }
       case "LABEL": {
         const name = parts[1];
-        labels[name] = position;
+        labels[name] = position; // Store current byte offset
         const nameEnc = encode(name);
-        emit(0x07, nameEnc.length, ...nameEnc);
+        emit(0x07, nameEnc.length, ...nameEnc); // Debug symbols
         break;
       }
       case "JMP": {
-        emit(0x08, 0); // dummy varlen
-        emit(0xff, 0xff);
+        emit(0x08, 0); // JMP opcode + dummy size
+        emit(0xff, 0xff); // Placeholder 2-byte jump target
         jumpFixups.push({ at: position - 2, label: parts[1] });
         break;
       }
       case "MUL": {
         const key = encode(parts[1]);
         const val = encode(parts[2]);
-        emit(0x19, key.length, ...key, val.length, ...val);  // opcode 0x19 for MUL
+        emit(0x19, key.length, ...key, val.length, ...val);  // Custom MUL opcode
         break;
       }
       case "IFZ":
       case "IFNZ": {
         const key = encode(parts[1]);
         emit(instr === "IFZ" ? 0x09 : 0x0A, key.length, ...key);
-        emit(0xff, 0xff);
+        emit(0xff, 0xff); // Jump address placeholder
         jumpFixups.push({ at: position - 2, label: parts[2] });
         break;
       }
@@ -129,7 +130,7 @@ const compileVMSource = (src) => {
         break;
       }
       case "PTRSET": {
-        emit(0x0B, parseInt(parts[1]));
+        emit(0x0B, parseInt(parts[1])); // Direct pointer
         break;
       }
       case "PTRINC": emit(0x0C); break;
@@ -153,10 +154,10 @@ const compileVMSource = (src) => {
       case "PUSH": {
         const PUSH_OPCODE = 0x1A;
         if (parts.length === 1) {
-          emit(PUSH_OPCODE, 0x00); // stack-mode: PUSH with 0-len
+          emit(PUSH_OPCODE, 0x00); // Stack-mode: push with 0-len (anonymous)
         } else {
           const arg = encode(parts[1]);
-          emit(PUSH_OPCODE, arg.length, ...arg); // named push
+          emit(PUSH_OPCODE, arg.length, ...arg); // Named push
         }
         break;
       }
@@ -175,7 +176,7 @@ const compileVMSource = (src) => {
     }
   }
 
-  // Patch jump addresses
+  // Patch forward referenced jumps
   for (const fix of jumpFixups) {
     if (!(fix.label in labels)) {
       console.error(`[JUMP FIX FAIL] Label "${fix.label}" was never defined`);
@@ -190,6 +191,7 @@ const compileVMSource = (src) => {
   return new Uint8Array(bytecode);
 };
 
+// Embed a compressed VM payload into the alpha channel of a base PNG image
 const embedPayloadInImage = async (imgFile, payloadBytes) => {
   const img = new Image();
   const imgData = await imgFile.arrayBuffer();
@@ -206,7 +208,7 @@ const embedPayloadInImage = async (imgFile, payloadBytes) => {
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imgData.data;
 
-      // CCSDS-style header: 2-byte length prefix
+      // 2-byte length prefix
       const lengthBytes = new Uint8Array(2);
       lengthBytes[0] = (payloadBytes.length >> 8) & 0xff;
       lengthBytes[1] = payloadBytes.length & 0xff;
@@ -215,14 +217,14 @@ const embedPayloadInImage = async (imgFile, payloadBytes) => {
       fullPayload.set(lengthBytes, 0);
       fullPayload.set(payloadBytes, 2);
 
-      // Embed into alpha channel ===
+      // Embed payload bits into alpha channel LSBs
       let bitIndex = 0;
       for (let i = 0; i < data.length; i += 4) {
         if (bitIndex >= fullPayload.length * 8) break;
         const byte = fullPayload[Math.floor(bitIndex / 8)];
         const bit = (byte >> (7 - (bitIndex % 8))) & 1;
 
-        if (data[i + 3] > 0) {
+        if (data[i + 3] > 0) { // Only modify visible pixels
           data[i + 3] = (data[i + 3] & 0xFE) | bit;
           bitIndex++;
         }
@@ -240,11 +242,13 @@ const embedPayloadInImage = async (imgFile, payloadBytes) => {
   });
 };
 
+// When "generate" is clicked, compile source, gzip, embed in PNG, preview + download
 document.getElementById("generate").addEventListener("click", async () => {
   const src = document.getElementById("vm-input").value;
   const iconFile = document.getElementById("base-icon").files[0];
   if (!iconFile) return alert("Upload base icon first.");
 
+  // Add 2-byte length prefix before compression
   const raw = compileVMSource(src);
   console.log("[HEX BYTECODE]", Array.from(raw).map(b => b.toString(16).padStart(2, "0")).join(" "));
   const rawLen = raw.length;
@@ -254,11 +258,13 @@ document.getElementById("generate").addEventListener("click", async () => {
   withLength.set(raw, 2);
   console.log("[DEBUG] Bytecode length prepended:", rawLen);
   
-  const compressed = gzipSync(withLength);
+  const compressed = gzipSync(withLength); // Gzip the bytecode to reduce size
 
+  // Embed into alpha channel of uploaded icon
   const newFavicon = await embedPayloadInImage(iconFile, compressed);
   const outputURL = URL.createObjectURL(newFavicon);
 
+  // Update preview and download link
   document.getElementById("output-icon").src = outputURL;
   document.getElementById("download-link").href = outputURL;
 });
