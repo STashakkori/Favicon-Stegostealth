@@ -1,5 +1,5 @@
 /* 
-Favicon Stegostealh - A Turing complete method of favicon steganography
+Favicon Stegostealth - A Turing complete method of favicon steganography
 
 Tested with Factorial of 5
 
