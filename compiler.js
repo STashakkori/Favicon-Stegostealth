@@ -171,6 +171,24 @@ const compileVMSource = (src) => {
         }
         break;
       }
+      case "STOREFAV": {
+        const key = encode(parts[1]);
+        const val = encode(parts.slice(2).join(" "));
+        emit(0x20, key.length, ...key, val.length, ...val);
+        break;
+      }
+      case "LOADFAV": {
+        const key = encode(parts[1]);
+        const target = parts[2] ? encode(parts[2]) : [];
+        emit(0x21, key.length, ...key);
+        if (parts[2]) emit(target.length, ...target); // optional 2nd argument
+        break;
+      }
+      case "DELFAV": {
+        const key = encode(parts[1]);
+        emit(0x22, key.length, ...key);
+        break;
+      }
       default:
         throw new Error("Unknown instruction: " + instr);
     }
@@ -188,8 +206,17 @@ const compileVMSource = (src) => {
     bytecode[fix.at + 1] = addr & 0xff;
   }
 
-  return new Uint8Array(bytecode);
+    return Object.freeze({
+    bytecode: new Uint8Array(bytecode),
+    source: src,
+    instructions: ticks,
+    labels: Object.freeze({ ...labels })
+  });
 };
+
+export function compileFaviconProgram(src) {
+  return compileVMSource(src).bytecode;
+}
 
 // Embed a compressed VM payload into the alpha channel of a base PNG image
 const embedPayloadInImage = async (imgFile, payloadBytes) => {
@@ -243,28 +270,33 @@ const embedPayloadInImage = async (imgFile, payloadBytes) => {
 };
 
 // When "generate" is clicked, compile source, gzip, embed in PNG, preview + download
-document.getElementById("generate").addEventListener("click", async () => {
-  const src = document.getElementById("vm-input").value;
-  const iconFile = document.getElementById("base-icon").files[0];
-  if (!iconFile) return alert("Upload base icon first.");
+document.addEventListener("DOMContentLoaded", () => {
+  const genBtn = document.getElementById("generate");
+  if (!genBtn) return;
 
-  // Add 2-byte length prefix before compression
-  const raw = compileVMSource(src);
-  console.log("[HEX BYTECODE]", Array.from(raw).map(b => b.toString(16).padStart(2, "0")).join(" "));
-  const rawLen = raw.length;
-  const withLength = new Uint8Array(2 + rawLen);
-  withLength[0] = (rawLen >> 8) & 0xff;
-  withLength[1] = rawLen & 0xff;
-  withLength.set(raw, 2);
-  console.log("[DEBUG] Bytecode length prepended:", rawLen);
+  genBtn.addEventListener("click", async () => {
+    const src = document.getElementById("vm-input").value;
+    const iconFile = document.getElementById("base-icon").files[0];
+    if (!iconFile) return alert("Upload base icon first.");
   
-  const compressed = gzipSync(withLength); // Gzip the bytecode to reduce size
-
-  // Embed into alpha channel of uploaded icon
-  const newFavicon = await embedPayloadInImage(iconFile, compressed);
-  const outputURL = URL.createObjectURL(newFavicon);
-
-  // Update preview and download link
-  document.getElementById("output-icon").src = outputURL;
-  document.getElementById("download-link").href = outputURL;
+    // Add 2-byte length prefix before compression
+    const raw = compileFaviconProgram(src);
+    console.log("[HEX BYTECODE]", Array.from(raw).map(b => b.toString(16).padStart(2, "0")).join(" "));
+    const rawLen = raw.length;
+    const withLength = new Uint8Array(2 + rawLen);
+    withLength[0] = (rawLen >> 8) & 0xff;
+    withLength[1] = rawLen & 0xff;
+    withLength.set(raw, 2);
+    console.log("[DEBUG] Bytecode length prepended:", rawLen);
+    
+    const compressed = gzipSync(withLength); // Gzip the bytecode to reduce size
+  
+    // Embed into alpha channel of uploaded icon
+    const newFavicon = await embedPayloadInImage(iconFile, compressed);
+    const outputURL = URL.createObjectURL(newFavicon);
+  
+    // Update preview and download link
+    document.getElementById("output-icon").src = outputURL;
+    document.getElementById("download-link").href = outputURL;
+  });
 });
